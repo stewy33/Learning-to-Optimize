@@ -3,18 +3,26 @@ import scipy.linalg
 import scipy.stats
 import torch
 import tqdm
-
 from ray import tune
 from ray.tune.suggest import ConcurrencyLimiter
 from ray.tune.suggest.hyperopt import HyperOptSearch
+from torch import nn
 
 
-def convex_quadratic(num_vars):
+class Variable(nn.Module):
+    def __init__(self, x0):
+        super().__init__()
+        self.x = [nn.parameter.Parameter(x0)]
+
+
+def convex_quadratic():
     """
     Generate a symmetric positive semidefinite matrix A with eigenvalues
     uniformly in [1e-3, 10].
 
     """
+    num_vars = 10
+
     # First generate an orthogonal matrix (of eigenvectors)
     eig_vecs = torch.tensor(
         scipy.stats.ortho_group.rvs(dim=(num_vars)), dtype=torch.float
@@ -25,17 +33,21 @@ def convex_quadratic(num_vars):
     A = eig_vecs @ torch.diag(eig_vals) @ eig_vecs.T
     b = torch.normal(0, 1 / num_vars, size=(num_vars,))
 
-    def quadratic(x):
+    x0 = torch.normal(0, 10 / np.sqrt(num_vars), size=(num_vars,))
+
+    def quadratic(var):
+        x = var.x[0]
         return 0.5 * x.T @ A @ x + b.T @ x
 
-    x0 = torch.normal(0, 10 / np.sqrt(num_vars), size=(num_vars,))
     optimal_x = scipy.linalg.solve(A.numpy(), -b.numpy(), assume_a="pos")
-    optimal_val = quadratic(torch.tensor(optimal_x)).item()
+    optimal_val = quadratic(Variable(torch.tensor(optimal_x))).item()
 
-    return x0, quadratic, optimal_x, optimal_val, A.numpy(), b.numpy()
+    return Variable(x0), quadratic, optimal_x, optimal_val, A.numpy(), b.numpy()
 
 
-def rosenbrock(num_vars):
+def rosenbrock():
+    num_vars = 10
+
     # Initialization strategy: x_i = -2 if i is even, x_i = +2 if i is odd
     x0 = torch.tensor([-1.5 if i % 2 == 0 else 1.5 for i in range(num_vars)])
 
@@ -50,7 +62,6 @@ def rosenbrock(num_vars):
 
 
 # def logistic_regression(num_vars):
-
 
 
 def minimize(obj_function, optimizer, x, iterations, verbose=False):
@@ -102,7 +113,7 @@ def tune_algos(
     algo_iters,
     tune_iters,
     hyperparam_space,
-    algos=["sgd", "momentum" "adam"]
+    algos=["sgd", "momentum" "adam"],
 ):
 
     results = {}
@@ -155,7 +166,10 @@ def tune_algos(
                 metric="objective_value", mode="min"
             )
 
-            results["momentum"] = {"analysis": momentum_analysis, "hyperparams": momentum_hyperparams}
+            results["momentum"] = {
+                "analysis": momentum_analysis,
+                "hyperparams": momentum_hyperparams,
+            }
 
         if algo == "adam":
 
