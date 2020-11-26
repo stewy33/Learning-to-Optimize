@@ -3,12 +3,10 @@ import scipy.linalg
 import scipy.stats
 import torch
 import tqdm
+
 from ray import tune
-from ray.tune.schedulers import AsyncHyperBandScheduler
 from ray.tune.suggest import ConcurrencyLimiter
 from ray.tune.suggest.hyperopt import HyperOptSearch
-
-import rgd
 
 
 def convex_quadratic(num_vars):
@@ -49,6 +47,10 @@ def rosenbrock(num_vars):
     optimal_val = 0
 
     return x0, rosen, optimal_x, optimal_val
+
+
+# def logistic_regression(num_vars):
+
 
 
 def minimize(obj_function, optimizer, x, iterations, verbose=False):
@@ -100,7 +102,7 @@ def tune_algos(
     algo_iters,
     tune_iters,
     hyperparam_space,
-    algos=["sgd", "cm", "nag", "adam", "rgd_eu", "rgd"],
+    algos=["sgd", "momentum" "adam"]
 ):
 
     results = {}
@@ -129,40 +131,15 @@ def tune_algos(
 
             results["sgd"] = {"analysis": sgd_analysis, "hyperparams": sgd_hyperparams}
 
-        if algo == "cm":
+        if algo == "momentum":
 
-            def run_cm(hyperparams):
+            def run_momentum(hyperparams):
                 return run_optimizer(
                     torch.optim.SGD, x0, obj_function, algo_iters, hyperparams
                 )
 
-            cm_analysis = tune.run(
-                make_experiment(run_cm),
-                config={
-                    "lr": hyperparam_space["lr"],
-                    "momentum": hyperparam_space["momentum"],
-                },
-                metric="objective_value",
-                mode="min",
-                search_alg=ConcurrencyLimiter(HyperOptSearch(), max_concurrent=3),
-                num_samples=tune_iters,
-                verbose=0,
-            )
-            cm_hyperparams = cm_analysis.get_best_config(
-                metric="objective_value", mode="min"
-            )
-
-            results["cm"] = {"analysis": cm_analysis, "hyperparams": cm_hyperparams}
-
-        if algo == "nag":
-
-            def run_nag(hyperparams):
-                return run_optimizer(
-                    torch.optim.SGD, x0, obj_function, algo_iters, hyperparams
-                )
-
-            nag_analysis = tune.run(
-                make_experiment(run_nag),
+            momentum_analysis = tune.run(
+                make_experiment(run_momentum),
                 config={
                     "nesterov": True,
                     "lr": hyperparam_space["lr"],
@@ -174,11 +151,11 @@ def tune_algos(
                 num_samples=tune_iters,
                 verbose=0,
             )
-            nag_hyperparams = nag_analysis.get_best_config(
+            momentum_hyperparams = momentum_analysis.get_best_config(
                 metric="objective_value", mode="min"
             )
 
-            results["nag"] = {"analysis": nag_analysis, "hyperparams": nag_hyperparams}
+            results["momentum"] = {"analysis": momentum_analysis, "hyperparams": momentum_hyperparams}
 
         if algo == "adam":
 
@@ -204,58 +181,5 @@ def tune_algos(
                 "analysis": adam_analysis,
                 "hyperparams": adam_hyperparams,
             }
-
-        if algo == "rgd_eu":
-
-            def run_rgd_eu(hyperparams):
-                return run_optimizer(rgd.RGD, x0, obj_function, algo_iters, hyperparams)
-
-            rgd_eu_analysis = tune.run(
-                make_experiment(run_rgd_eu),
-                config={
-                    "integrator": "symplectic_euler",
-                    "lr": hyperparam_space["lr"],
-                    "momentum": hyperparam_space["momentum"],
-                    "delta": hyperparam_space["delta"],
-                },
-                metric="objective_value",
-                mode="min",
-                search_alg=ConcurrencyLimiter(HyperOptSearch(), max_concurrent=3),
-                num_samples=tune_iters,
-                verbose=0,
-            )
-            rgd_eu_hyperparams = rgd_eu_analysis.get_best_config(
-                metric="objective_value", mode="min"
-            )
-
-            results["rgd_eu"] = {
-                "analysis": rgd_eu_analysis,
-                "hyperparams": rgd_eu_hyperparams,
-            }
-
-        if algo == "rgd":
-
-            def run_rgd(hyperparams):
-                return run_optimizer(rgd.RGD, x0, obj_function, algo_iters, hyperparams)
-
-            rgd_analysis = tune.run(
-                make_experiment(run_rgd),
-                config={
-                    "integrator": "leapfrog",
-                    "lr": hyperparam_space["lr"],
-                    "momentum": hyperparam_space["momentum"],
-                    "delta": hyperparam_space["delta"],
-                },
-                metric="objective_value",
-                mode="min",
-                search_alg=ConcurrencyLimiter(HyperOptSearch(), max_concurrent=3),
-                num_samples=tune_iters,
-                verbose=0,
-            )
-            rgd_hyperparams = rgd_analysis.get_best_config(
-                metric="objective_value", mode="min"
-            )
-
-            results["rgd"] = {"analysis": rgd_analysis, "hyperparams": rgd_hyperparams}
 
     return results
