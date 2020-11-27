@@ -1,3 +1,5 @@
+import copy
+
 import numpy as np
 import scipy.linalg
 import scipy.stats
@@ -7,12 +9,13 @@ from ray import tune
 from ray.tune.suggest import ConcurrencyLimiter
 from ray.tune.suggest.hyperopt import HyperOptSearch
 from torch import nn
+from torch.nn import functional as F
 
 
 class Variable(nn.Module):
     def __init__(self, x0):
         super().__init__()
-        self.x = [nn.parameter.Parameter(x0)]
+        self.x = nn.Parameter(x0)
 
 
 def convex_quadratic():
@@ -21,14 +24,14 @@ def convex_quadratic():
     uniformly in [1e-3, 10].
 
     """
-    num_vars = 10
+    num_vars = 2
 
     # First generate an orthogonal matrix (of eigenvectors)
     eig_vecs = torch.tensor(
         scipy.stats.ortho_group.rvs(dim=(num_vars)), dtype=torch.float
     )
     # Now generate eigenvalues
-    eig_vals = torch.rand(num_vars) * 10 + 1e-3
+    eig_vals = torch.rand(num_vars) * 3 + 1
 
     A = eig_vecs @ torch.diag(eig_vals) @ eig_vecs.T
     b = torch.normal(0, 1 / num_vars, size=(num_vars,))
@@ -36,13 +39,20 @@ def convex_quadratic():
     x0 = torch.normal(0, 10 / np.sqrt(num_vars), size=(num_vars,))
 
     def quadratic(var):
-        x = var.x[0]
+        x = var.x
         return 0.5 * x.T @ A @ x + b.T @ x
 
     optimal_x = scipy.linalg.solve(A.numpy(), -b.numpy(), assume_a="pos")
     optimal_val = quadratic(Variable(torch.tensor(optimal_x))).item()
 
-    return Variable(x0), quadratic, optimal_x, optimal_val, A.numpy(), b.numpy()
+    return {
+        "model0": Variable(x0),
+        "obj_function": quadratic,
+        "optimal_x": optimal_x,
+        "optimal_val": optimal_val,
+        "A": A.numpy(),
+        "b": b.numpy(),
+    }
 
 
 def rosenbrock():
@@ -61,40 +71,85 @@ def rosenbrock():
     return x0, rosen, optimal_x, optimal_val
 
 
-# def logistic_regression(num_vars):
+def logistic_regression():
+    num_vars = 3
+
+    g0 = torch.distributions.multivariate_normal.MultivariateNormal(
+        loc=torch.randn(num_vars),
+        scale_tril=torch.tril(torch.randn((num_vars, num_vars))),
+    )
+    g1 = torch.distributions.multivariate_normal.MultivariateNormal(
+        loc=torch.randn(num_vars),
+        scale_tril=torch.tril(torch.randn((num_vars, num_vars))),
+    )
+
+    x = torch.cat([g0.sample((50,)), g1.sample((50,))])
+    y = torch.cat([torch.zeros(50), torch.ones(50)])
+    perm = torch.randperm(len(x))
+    x = x[perm]
+    y = y[perm]
+
+    model0 = nn.Sequential(nn.Linear(num_vars, 1), nn.Sigmoid())
+
+    def obj_function(model):
+        y_hat = model(x).view(-1)
+        return F.binary_cross_entropy(y_hat, y)
+
+    return {"model0": model0, "obj_function": obj_function}
 
 
-def minimize(obj_function, optimizer, x, iterations, verbose=False):
+def mlp():
+    model0 = nn.Sequential(nn.Linear(2, 2), nn.ReLU(), nn.Linear(2, 1), nn.Sigmoid())
+
+    def obj_function(model):
+        y_hat = model(x).view(-1)
+        return F.binary_cross_entropy(y_hat, y)
+
+    return {
+        "model0": model0,
+        "obj_function": obj_function,
+    }
+
+
+def minimize(obj_function, optimizer, model, iterations, verbose=False):
     trajectory = []
     values = []
-    for i in range(iterations):
+
+    # Passed to optimizer. This setup is required to give the autonomous
+    # optimizer access to the objective value and not just its gradients.
+    def closure():
         optimizer.zero_grad()
 
-        obj_value = obj_function(x)
-        if torch.isnan(obj_value) or torch.isinf(obj_value):
+        obj_value = obj_function(model)
+        obj_value.backward()
+
+        values.append(obj_value.item())
+        return obj_value
+
+    # Minimize
+    for i in range(iterations):
+        optimizer.step(closure)
+
+        # Stop optimizing if we start getting nans as objective values
+        if np.isnan(values[-1]) or np.isinf(values[-1]):
             break
 
-        trajectory.append(x.detach().clone().numpy())
-        values.append(obj_value.item())
-
-        obj_value.backward()
-        optimizer.step()
-
         if verbose and i % (iterations // 10) == 0:
-            print(i, obj_value.item())
+            print(i, values[-1].item())
 
     return np.array(values), np.array(trajectory)
 
 
-def run_optimizer(make_optimizer, x0, obj_function, iterations, hyperparams):
+def run_optimizer(make_optimizer, problem, iterations, hyperparams):
     # Initial solution
-    x = x0.clone().requires_grad_()
+    model = copy.deepcopy(problem["model0"])
+    obj_function = problem["obj_function"]
 
     # Define optimizer
-    optimizer = make_optimizer([x], **hyperparams)
+    optimizer = make_optimizer(model.parameters(), **hyperparams)
 
     # Run
-    vals, traj = minimize(obj_function, optimizer, x, iterations)
+    vals, traj = minimize(obj_function, optimizer, model, iterations)
     return np.nan_to_num(vals, 1e6), traj
 
 
