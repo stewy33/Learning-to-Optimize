@@ -43,7 +43,9 @@ class AutonomousOptimizer(optim.Optimizer):
             observation[i, 1:] = grad.detach().numpy()
 
         # Clip observation to fit in observation space Box and return it
-        return observation.clip(self.policy.observation_space.low, self.policy.observation_space.high)
+        return observation.clip(
+            self.policy.observation_space.low, self.policy.observation_space.high
+        )
 
     @torch.no_grad()
     def step(self, closure):

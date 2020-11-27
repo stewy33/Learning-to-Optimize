@@ -21,7 +21,7 @@ class Variable(nn.Module):
 def convex_quadratic():
     """
     Generate a symmetric positive semidefinite matrix A with eigenvalues
-    uniformly in [1e-3, 10].
+    uniformly in [1, 10].
 
     """
     num_vars = 2
@@ -31,7 +31,7 @@ def convex_quadratic():
         scipy.stats.ortho_group.rvs(dim=(num_vars)), dtype=torch.float
     )
     # Now generate eigenvalues
-    eig_vals = torch.rand(num_vars) * 3 + 1
+    eig_vals = torch.rand(num_vars) * 9 + 1
 
     A = eig_vecs @ torch.diag(eig_vals) @ eig_vecs.T
     b = torch.normal(0, 1 / num_vars, size=(num_vars,))
@@ -99,6 +99,26 @@ def logistic_regression():
 
 
 def mlp():
+    num_vars = 2
+
+    gaussians = [
+        torch.distributions.multivariate_normal.MultivariateNormal(
+            loc=torch.randn(num_vars),
+            scale_tril=torch.tril(torch.randn((num_vars, num_vars))),
+        )
+        for _ in range(4)
+    ]
+
+    gaussian_labels = [0] * 4
+    while np.all(gaussian_labels == 0) or np.all(gaussian_labels == 1):
+        gaussian_labels = torch.randint(0, 2, size=4)
+
+    x = torch.cat([g.sample((25,)) for g in gaussians])
+    y = torch.cat([torch.zeros((25,)) + i for i in range(4)])
+    perm = torch.randperm(len(x))
+    x = x[perm]
+    y = y[perm]
+
     model0 = nn.Sequential(nn.Linear(2, 2), nn.ReLU(), nn.Linear(2, 1), nn.Sigmoid())
 
     def obj_function(model):
@@ -111,9 +131,18 @@ def mlp():
     }
 
 
-def minimize(obj_function, optimizer, model, iterations, verbose=False):
-    trajectory = []
+def run_optimizer(make_optimizer, problem, iterations, hyperparams):
+    # Initial solution
+    model = copy.deepcopy(problem["model0"])
+    obj_function = problem["obj_function"]
+
+    # Define optimizer
+    optimizer = make_optimizer(model.parameters(), **hyperparams)
+
+    # We will keep track of the objective values and weight trajectories
+    # throughout the optimization process.
     values = []
+    trajectory = []
 
     # Passed to optimizer. This setup is required to give the autonomous
     # optimizer access to the objective value and not just its gradients.
@@ -134,56 +163,35 @@ def minimize(obj_function, optimizer, model, iterations, verbose=False):
         if np.isnan(values[-1]) or np.isinf(values[-1]):
             break
 
-        if verbose and i % (iterations // 10) == 0:
-            print(i, values[-1].item())
-
-    return np.array(values), np.array(trajectory)
-
-
-def run_optimizer(make_optimizer, problem, iterations, hyperparams):
-    # Initial solution
-    model = copy.deepcopy(problem["model0"])
-    obj_function = problem["obj_function"]
-
-    # Define optimizer
-    optimizer = make_optimizer(model.parameters(), **hyperparams)
-
-    # Run
-    vals, traj = minimize(obj_function, optimizer, model, iterations)
-    return np.nan_to_num(vals, 1e6), traj
-
-
-def make_experiment(tune_objective):
-    def experiment(hyperparams):
-        vals, traj = tune_objective(hyperparams)
-        for obj_val in vals:
-            tune.report(objective_value=obj_val)
-
-    return experiment
+    return np.nan_to_num(values, 1e6), np.array(trajectory)
 
 
 def tune_algos(
-    x0,
-    obj_function,
+    dataset,
     algo_iters,
     tune_iters,
     hyperparam_space,
     algos=["sgd", "momentum" "adam"],
 ):
+    def make_experiment(make_optimizer):
+
+        def experiment(hyperparams):
+            best_obj_vals = []
+            for problem in dataset:
+                vals, traj = run_optimizer(make_optimizer, problem, algo_iters, hyperparams)
+                best_obj_vals.append(vals.min())
+
+            tune.report(objective_value=np.mean(best_obj_vals))
+
+        return experiment
 
     results = {}
-
     for algo in tqdm.tqdm(algos):
 
         if algo == "sgd":
 
-            def run_sgd(hyperparams):
-                return run_optimizer(
-                    torch.optim.SGD, x0, obj_function, algo_iters, hyperparams
-                )
-
             sgd_analysis = tune.run(
-                make_experiment(run_sgd),
+                make_experiment(torch.optim.SGD),
                 config={"lr": hyperparam_space["lr"]},
                 metric="objective_value",
                 mode="min",
@@ -199,13 +207,8 @@ def tune_algos(
 
         if algo == "momentum":
 
-            def run_momentum(hyperparams):
-                return run_optimizer(
-                    torch.optim.SGD, x0, obj_function, algo_iters, hyperparams
-                )
-
             momentum_analysis = tune.run(
-                make_experiment(run_momentum),
+                make_experiment(torch.optim.SGD),
                 config={
                     "nesterov": True,
                     "lr": hyperparam_space["lr"],
@@ -228,13 +231,8 @@ def tune_algos(
 
         if algo == "adam":
 
-            def run_adam(hyperparams):
-                return run_optimizer(
-                    torch.optim.Adam, x0, obj_function, algo_iters, hyperparams
-                )
-
             adam_analysis = tune.run(
-                make_experiment(run_adam),
+                make_experiment(torch.optim.Adam),
                 config={"lr": hyperparam_space["lr"]},
                 metric="objective_value",
                 mode="min",
