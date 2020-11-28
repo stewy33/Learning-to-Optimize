@@ -56,19 +56,25 @@ def convex_quadratic():
 
 
 def rosenbrock():
-    num_vars = 10
+    num_vars = 2
 
     # Initialization strategy: x_i = -2 if i is even, x_i = +2 if i is odd
     x0 = torch.tensor([-1.5 if i % 2 == 0 else 1.5 for i in range(num_vars)])
 
-    def rosen(x):
+    def rosen(var):
+        x = var.x
         return torch.sum(100.0 * (x[1:] - x[:-1] ** 2.0) ** 2.0 + (1 - x[:-1]) ** 2.0)
 
     # Optimum at all x_i = 1, giving f(x) = 0
     optimal_x = np.ones(num_vars)
     optimal_val = 0
 
-    return x0, rosen, optimal_x, optimal_val
+    return {
+        "model0": Variable(x0),
+        "obj_function": rosen,
+        "optimal_x": optimal_x,
+        "optimal_val": optimal_val,
+    }
 
 
 def logistic_regression():
@@ -174,11 +180,12 @@ def tune_algos(
     algos=["sgd", "momentum" "adam"],
 ):
     def make_experiment(make_optimizer):
-
         def experiment(hyperparams):
             best_obj_vals = []
             for problem in dataset:
-                vals, traj = run_optimizer(make_optimizer, problem, algo_iters, hyperparams)
+                vals, traj = run_optimizer(
+                    make_optimizer, problem, algo_iters, hyperparams
+                )
                 best_obj_vals.append(vals.min())
 
             tune.report(objective_value=np.mean(best_obj_vals))
