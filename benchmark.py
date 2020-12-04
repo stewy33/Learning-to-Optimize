@@ -3,6 +3,7 @@ import copy
 import numpy as np
 import scipy.linalg
 import scipy.stats
+from matplotlib import pyplot as plt
 import torch
 import tqdm
 from ray import tune
@@ -13,9 +14,12 @@ from torch.nn import functional as F
 
 
 class Variable(nn.Module):
-    def __init__(self, x0):
+    """A wrapper to turn a tensor of parameters into a module for optimization."""
+
+    def __init__(self, data: torch.Tensor):
+        """Create Variable holding `data` tensor."""
         super().__init__()
-        self.x = nn.Parameter(x0)
+        self.x = nn.Parameter(data)
 
 
 def convex_quadratic():
@@ -90,7 +94,7 @@ def logistic_regression():
     )
 
     x = torch.cat([g0.sample((50,)), g1.sample((50,))])
-    y = torch.cat([torch.zeros(50), torch.ones(50)])
+    y = torch.cat([torch.zeros((50,)), torch.ones((50,))])
     perm = torch.randperm(len(x))
     x = x[perm]
     y = y[perm]
@@ -108,6 +112,7 @@ def logistic_regression():
 def mlp():
     num_vars = 2
 
+    # Create four gaussian distributions with random mean and covariance
     gaussians = [
         torch.distributions.multivariate_normal.MultivariateNormal(
             loc=torch.randn(num_vars),
@@ -116,12 +121,16 @@ def mlp():
         for _ in range(4)
     ]
 
-    gaussian_labels = [0] * 4
-    while np.all(gaussian_labels == 0) or np.all(gaussian_labels == 1):
-        gaussian_labels = torch.randint(0, 2, size=4)
+    # Randomly assign each of the four gaussians a 0-1 label
+    # Repeat this process if all four gaussians have the same label
+    gaussian_labels = np.zeros((4,))
+    while (gaussian_labels == 0).all() or (gaussian_labels == 1).all():
+        gaussian_labels = torch.randint(0, 2, size=(4,))
 
+    # Generate a dataset of 100 points with 25 points drawn from each gaussian
+    # Label of the datapoint is the same as the label of the gaussian it came from
     x = torch.cat([g.sample((25,)) for g in gaussians])
-    y = torch.cat([torch.zeros((25,)) + i for i in range(4)])
+    y = torch.cat([torch.full((25,), float(label)) for label in gaussian_labels])
     perm = torch.randperm(len(x))
     x = x[perm]
     y = y[perm]
@@ -130,11 +139,13 @@ def mlp():
 
     def obj_function(model):
         y_hat = model(x).view(-1)
-        return F.binary_cross_entropy(y_hat, y)
+        weight_norm = model[0].weight.norm() + model[2].weight.norm()
+        return F.binary_cross_entropy(y_hat, y) + 5e-4 / 2 * weight_norm
 
     return {
         "model0": model0,
         "obj_function": obj_function,
+        "dataset": (x, y)
     }
 
 
@@ -172,6 +183,41 @@ def run_optimizer(make_optimizer, problem, iterations, hyperparams):
             break
 
     return np.nan_to_num(values, 1e6), trajectory
+
+
+def plot_trajectories(trajectories, problem, get_weights, set_weights):
+    """Plot trajectories"""
+    data = {}
+    for name, traj in trajectories.items():
+        data[name] = np.array([get_weights(model) for model in traj])
+
+    xmin = min(np.array(d)[:, 0].min() for d in data.values())
+    ymin = min(np.array(d)[:, 1].min() for d in data.values())
+    xmax = max(np.array(d)[:, 0].max() for d in data.values())
+    ymax = max(np.array(d)[:, 1].max() for d in data.values())
+
+    X = np.linspace(xmin - (xmax - xmin) * 0.2, xmax + (xmax - xmin) * 0.2, num=100)
+    Y = np.linspace(ymin - (ymax - ymin) * 0.2, ymax + (ymax - ymin) * 0.2, num=100)
+
+    model = copy.deepcopy(problem["model0"])
+    Z = np.empty((len(Y), len(X)))
+    for i in range(len(X)):
+        for j in range(len(Y)):
+            set_weights(model, X[i], Y[j])
+            Z[j, i] = problem["obj_function"](model)
+
+    plt.figure(figsize=(10, 6), dpi=500)
+    plt.contourf(X, Y, Z, 30, cmap='RdGy')
+    plt.colorbar()
+
+    for name, traj in data.items():
+        plt.plot(traj[:, 0], traj[:, 1], label=name)
+
+    plt.plot(*get_weights(problem["model0"]), 'bo')
+    plt.legend()
+
+    plt.plot()
+    plt.show()
 
 
 def tune_algos(

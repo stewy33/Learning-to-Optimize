@@ -94,7 +94,6 @@ class Environment(gym.Env):
         super().__init__()
 
         self.dataset = dataset
-        self.current_obj_function = 0
         self.num_steps = num_steps
         self.history_len = history_len
 
@@ -113,10 +112,9 @@ class Environment(gym.Env):
         )
 
     def _setup_episode(self):
-        res = self.dataset[self.current_obj_function]
+        res = np.random.choice(self.dataset)
         self.model = copy.deepcopy(res["model0"])
         self.obj_function = res["obj_function"]
-        self.current_obj_function = (self.current_obj_function + 1) % len(self.dataset)
 
         self.obj_values = []
         self.gradients = []
