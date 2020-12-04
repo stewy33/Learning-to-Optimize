@@ -74,7 +74,9 @@ class AutonomousOptimizer(optim.Optimizer):
         action = torch.from_numpy(action)
         for group in self.param_groups:
             for p in group["params"]:
-                p.add_(action[param_counter : len(p)])
+                delta_p = action[param_counter : param_counter + p.numel()]
+                p.add_(delta_p.reshape(p.shape), alpha=1e-1)
+                param_counter += p.numel()
 
         return obj_value
 
@@ -110,9 +112,6 @@ class Environment(gym.Env):
             dtype=np.float32,
         )
 
-        # Validate environment
-        check_env(self)
-
     def _setup_episode(self):
         res = self.dataset[self.current_obj_function]
         self.model = copy.deepcopy(res["model0"])
@@ -133,7 +132,9 @@ class Environment(gym.Env):
         action = torch.from_numpy(action)
         param_counter = 0
         for p in self.model.parameters():
-            p.add_(action[param_counter : len(p)])
+            delta_p = action[param_counter : param_counter + p.numel()]
+            p.add_(delta_p.reshape(p.shape), alpha=1e-1)
+            param_counter += p.numel()
 
         # Calculate the new objective value
         with torch.enable_grad():

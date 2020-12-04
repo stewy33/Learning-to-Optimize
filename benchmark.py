@@ -21,7 +21,7 @@ class Variable(nn.Module):
 def convex_quadratic():
     """
     Generate a symmetric positive semidefinite matrix A with eigenvalues
-    uniformly in [1, 10].
+    uniformly in [1, 30].
 
     """
     num_vars = 2
@@ -31,7 +31,7 @@ def convex_quadratic():
         scipy.stats.ortho_group.rvs(dim=(num_vars)), dtype=torch.float
     )
     # Now generate eigenvalues
-    eig_vals = torch.rand(num_vars) * 9 + 1
+    eig_vals = torch.rand(num_vars) * 29 + 1
 
     A = eig_vecs @ torch.diag(eig_vals) @ eig_vecs.T
     b = torch.normal(0, 1 / num_vars, size=(num_vars,))
@@ -99,7 +99,8 @@ def logistic_regression():
 
     def obj_function(model):
         y_hat = model(x).view(-1)
-        return F.binary_cross_entropy(y_hat, y)
+        weight_norm = model[0].weight.norm()
+        return F.binary_cross_entropy(y_hat, y) + 5e-4 / 2 * weight_norm
 
     return {"model0": model0, "obj_function": obj_function}
 
@@ -153,6 +154,7 @@ def run_optimizer(make_optimizer, problem, iterations, hyperparams):
     # Passed to optimizer. This setup is required to give the autonomous
     # optimizer access to the objective value and not just its gradients.
     def closure():
+        trajectory.append(copy.deepcopy(model))
         optimizer.zero_grad()
 
         obj_value = obj_function(model)
@@ -169,7 +171,7 @@ def run_optimizer(make_optimizer, problem, iterations, hyperparams):
         if np.isnan(values[-1]) or np.isinf(values[-1]):
             break
 
-    return np.nan_to_num(values, 1e6), np.array(trajectory)
+    return np.nan_to_num(values, 1e6), trajectory
 
 
 def tune_algos(
