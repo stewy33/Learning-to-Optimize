@@ -318,7 +318,7 @@ def tune_algos(
     algo_iters,
     tune_iters,
     hyperparam_space,
-    algos=["sgd", "momentum" "adam"],
+    algos=["sgd", "momentum" "adam", "lbfgs"],
 ):
     def make_experiment(make_optimizer):
         def experiment(hyperparams):
@@ -395,6 +395,26 @@ def tune_algos(
             results["adam"] = {
                 "analysis": adam_analysis,
                 "hyperparams": adam_hyperparams,
+            }
+
+        if algo == "lbfgs":
+
+            lbfgs_analysis = tune.run(
+                make_experiment(torch.optim.LBFGS),
+                config={"lr": hyperparam_space["lr"], "max_iter": 1},
+                metric="objective_value",
+                mode="min",
+                search_alg=ConcurrencyLimiter(HyperOptSearch(), max_concurrent=3),
+                num_samples=tune_iters,
+                verbose=0,
+            )
+            lbfgs_hyperparams = lbfgs_analysis.get_best_config(
+                metric="objective_value", mode="min"
+            )
+
+            results["lbfgs"] = {
+                "analysis": lbfgs_analysis,
+                "hyperparams": lbfgs_hyperparams,
             }
 
     return results
