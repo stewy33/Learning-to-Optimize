@@ -5,8 +5,23 @@ import gym
 import numpy as np
 import torch
 from gym import spaces
-from stable_baselines.common.env_checker import check_env
 from torch import optim
+
+
+def make_observation(obj_value, obj_values, gradients, num_params, history_len):
+    # Features is a matrix where the ith row is a concatenation of the difference
+    # in the current objective value and that of the ith previous iterate as well
+    # as the ith previous gradient.
+    observation = np.zeros((history_len, 1 + num_params), dtype="float32")
+    observation[: len(obj_values), 0] = (
+        obj_value - torch.tensor(obj_values).detach().numpy()
+    )
+    for i, grad in enumerate(gradients):
+        observation[i, 1:] = grad.detach().numpy()
+
+    # Normalize and clip observation space
+    observation /= 50
+    return observation.clip(-1, 1)
 
 
 class AutonomousOptimizer(optim.Optimizer):
@@ -31,22 +46,6 @@ class AutonomousOptimizer(optim.Optimizer):
         self.obj_values = []
         self.gradients = []
 
-    def _make_observation(self, obj_value):
-        # Features is a matrix where the ith row is a concatenation of the difference
-        # in the current objective value and that of the ith previous iterate as well
-        # as the ith previous gradient.
-        observation = np.zeros((self.history_len, 1 + self.num_params), dtype="float32")
-        observation[: len(self.obj_values), 0] = (
-            obj_value - torch.tensor(self.obj_values).detach().numpy()
-        )
-        for i, grad in enumerate(self.gradients):
-            observation[i, 1:] = grad.detach().numpy()
-
-        # Clip observation to fit in observation space Box and return it
-        return observation.clip(
-            self.policy.observation_space.low, self.policy.observation_space.high
-        )
-
     @torch.no_grad()
     def step(self, closure):
         with torch.enable_grad():
@@ -66,8 +65,14 @@ class AutonomousOptimizer(optim.Optimizer):
         self.gradients.insert(0, current_grad)
 
         # Run policy
-        observation = self._make_observation(obj_value.item())
-        action, _states = self.policy.predict(observation)
+        observation = make_observation(
+            obj_value.item(),
+            self.obj_values,
+            self.gradients,
+            self.num_params,
+            self.history_len,
+        )
+        action, _states = self.policy.predict(observation, deterministic=True)
 
         # Update the parameters according to the policy
         param_counter = 0
@@ -75,7 +80,7 @@ class AutonomousOptimizer(optim.Optimizer):
         for group in self.param_groups:
             for p in group["params"]:
                 delta_p = action[param_counter : param_counter + p.numel()]
-                p.add_(delta_p.reshape(p.shape), alpha=1e-1)
+                p.add_(delta_p.reshape(p.shape))
                 param_counter += p.numel()
 
         return obj_value
@@ -85,11 +90,7 @@ class Environment(gym.Env):
     """Optimization environment based on TF-Agents."""
 
     def __init__(
-        self,
-        dataset,
-        num_steps,
-        history_len,
-        observation_clip_threshold=100,
+        self, dataset, num_steps, history_len,
     ):
         super().__init__()
 
@@ -102,11 +103,11 @@ class Environment(gym.Env):
 
         # Define action and observation space
         self.action_space = spaces.Box(
-            low=-100, high=100, shape=(self.num_params,), dtype=np.float32
+            low=-1, high=1, shape=(self.num_params,), dtype=np.float32
         )
         self.observation_space = spaces.Box(
-            low=-observation_clip_threshold,
-            high=observation_clip_threshold,
+            low=-1,
+            high=1,
             shape=(self.history_len, 1 + self.num_params),
             dtype=np.float32,
         )
@@ -122,7 +123,9 @@ class Environment(gym.Env):
 
     def reset(self):
         self._setup_episode()
-        return self._make_observation(None)
+        return make_observation(
+            None, self.obj_values, self.gradients, self.num_params, self.history_len
+        )
 
     @torch.no_grad()
     def step(self, action):
@@ -131,7 +134,7 @@ class Environment(gym.Env):
         param_counter = 0
         for p in self.model.parameters():
             delta_p = action[param_counter : param_counter + p.numel()]
-            p.add_(delta_p.reshape(p.shape), alpha=1e-1)
+            p.add_(delta_p.reshape(p.shape))
             param_counter += p.numel()
 
         # Calculate the new objective value
@@ -154,24 +157,16 @@ class Environment(gym.Env):
         self.gradients.insert(0, current_grad)
 
         # Return observation, reward, done, and empty info
-        observation = self._make_observation(obj_value.item())
+        observation = make_observation(
+            obj_value.item(),
+            self.obj_values,
+            self.gradients,
+            self.num_params,
+            self.history_len,
+        )
         reward = -obj_value.item()
         done = self.current_step >= self.num_steps
         info = {}
 
         self.current_step += 1
         return observation, reward, done, info
-
-    def _make_observation(self, obj_value):
-        # Features is a matrix where the ith row is a concatenation of the difference
-        # in the current objective value and that of the ith previous iterate as well
-        # as the ith previous gradient.
-        observation = np.zeros((self.history_len, 1 + self.num_params), dtype="float32")
-        observation[: len(self.obj_values), 0] = (
-            obj_value - torch.tensor(self.obj_values).detach().numpy()
-        )
-        for i, grad in enumerate(self.gradients):
-            observation[i, 1:] = grad.detach().numpy()
-
-        # Clip observation to fit in observation space Box and return it
-        return observation.clip(self.observation_space.low, self.observation_space.high)

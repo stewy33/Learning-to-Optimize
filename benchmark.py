@@ -6,9 +6,10 @@ import scipy.stats
 import torch
 import tqdm
 from matplotlib import pyplot as plt
-from ray import tune
-from ray.tune.suggest import ConcurrencyLimiter
-from ray.tune.suggest.hyperopt import HyperOptSearch
+
+# from ray import tune
+# from ray.tune.suggest import ConcurrencyLimiter
+# from ray.tune.suggest.hyperopt import HyperOptSearch
 from torch import nn
 from torch.nn import functional as F
 
@@ -40,9 +41,9 @@ def convex_quadratic():
     eig_vals = torch.rand(num_vars) * 29 + 1
 
     A = eig_vecs @ torch.diag(eig_vals) @ eig_vecs.T
-    b = torch.normal(0, 1 / num_vars, size=(num_vars,))
+    b = torch.normal(0, 1 / np.sqrt(num_vars), size=(num_vars,))
 
-    x0 = torch.normal(0, 10 / np.sqrt(num_vars), size=(num_vars,))
+    x0 = torch.normal(0, 0.5 / np.sqrt(num_vars), size=(num_vars,))
 
     def quadratic(var):
         x = var.x
@@ -108,7 +109,7 @@ def logistic_regression():
         weight_norm = model[0].weight.norm()
         return F.binary_cross_entropy(y_hat, y) + 5e-4 / 2 * weight_norm
 
-    return {"model0": model0, "obj_function": obj_function}
+    return {"model0": model0, "obj_function": obj_function, "data": (x, y)}
 
 
 def robust_linear_regression():
@@ -166,7 +167,7 @@ def mlp():
     ]
 
     # Randomly assign each of the four gaussians a 0-1 label
-    # Repeat this process if all four gaussians have the same label
+    # Do again if all four gaussians have the same label (don't want that)
     gaussian_labels = np.zeros((4,))
     while (gaussian_labels == 0).all() or (gaussian_labels == 1).all():
         gaussian_labels = torch.randint(0, 2, size=(4,))
@@ -225,6 +226,10 @@ def run_optimizer(make_optimizer, problem, iterations, hyperparams):
             break
 
     return np.nan_to_num(values, 1e6), trajectory
+
+
+def accuracy(model, x, y):
+    return ((model(x).view(-1) > 0.5) == y).float().mean().item()
 
 
 def run_all_optimizers(problem, iterations, tune_dict, policy):
