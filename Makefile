@@ -4,6 +4,3 @@ format:
 
 lint:
 	python -m flake8 .
-
-test:
-	python -m pytest tests

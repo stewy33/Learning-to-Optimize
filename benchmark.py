@@ -4,12 +4,12 @@ import numpy as np
 import scipy.linalg
 import scipy.stats
 import torch
-import tqdm
 from matplotlib import pyplot as plt
 
 # from ray import tune
 # from ray.tune.suggest import ConcurrencyLimiter
 # from ray.tune.suggest.hyperopt import HyperOptSearch
+# import tqdm
 from torch import nn
 from torch.nn import functional as F
 
@@ -311,7 +311,7 @@ def plot_trajectories(trajectories, problem, get_weights, set_weights):
     for name, traj in data.items():
         plt.plot(traj[:, 0], traj[:, 1], label=name)
 
-    plt.title('Convex Quadratic Trajectory Plot')
+    plt.title("Convex Quadratic Trajectory Plot")
     plt.plot(*get_weights(problem["model0"]), "bo")
     plt.legend()
 
@@ -319,13 +319,15 @@ def plot_trajectories(trajectories, problem, get_weights, set_weights):
     plt.show()
 
 
-def tune_algos(
+'''def tune_algos(
     dataset,
     algo_iters,
     tune_iters,
     hyperparam_space,
     algos=["sgd", "momentum" "adam", "lbfgs"],
 ):
+    """Tune hyperparameters with Bayesian optimization."""
+
     def make_experiment(make_optimizer):
         def experiment(hyperparams):
             best_obj_vals = []
@@ -423,4 +425,4 @@ def tune_algos(
                 "hyperparams": lbfgs_hyperparams,
             }
 
-    return results
+    return results'''

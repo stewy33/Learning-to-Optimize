@@ -90,7 +90,10 @@ class Environment(gym.Env):
     """Optimization environment based on TF-Agents."""
 
     def __init__(
-        self, dataset, num_steps, history_len,
+        self,
+        dataset,
+        num_steps,
+        history_len,
     ):
         super().__init__()
 
