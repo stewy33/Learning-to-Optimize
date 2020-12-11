@@ -1,5 +1,5 @@
 # Learning-to-Optimize 📈
-A (mostly faithful) implementation of the 2016 paper [Learning to Optimize](https://arxiv.org/abs/1606.01885). You can find a more causal explanation in [this blog post](https://bair.berkeley.edu/blog/2017/09/12/learning-to-optimize-with-rl/).
+A (mostly faithful) implementation of the 2016 paper [Learning to Optimize](https://arxiv.org/abs/1606.01885). You can find a more casual explanation in [this blog post](https://bair.berkeley.edu/blog/2017/09/12/learning-to-optimize-with-rl/).
 
 The main idea behind the paper is simple: instead of using handcrafted optimization algorithms, why not learn them? The paper presents a framework for learning optimization algorithms for machine learning objectives. They cast this as a reinforcement learning problem, where the algorithm is the policy, and the reward is the negative objective function. Check out the blog post or paper for more details.
 
